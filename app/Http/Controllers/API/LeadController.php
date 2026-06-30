@@ -561,6 +561,158 @@ class LeadController extends Controller
     }
 
     /**
+     * Bulk create leads
+     */
+    public function bulkCreate(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'leads' => 'required|array|min:1',
+            'leads.*.name' => 'required|string|max:255',
+            'leads.*.email' => 'required|email|max:255',
+            'leads.*.phone' => 'nullable|string|max:20',
+            'leads.*.tech_support_phone' => 'nullable|string|max:50',
+            'leads.*.store_link' => 'nullable|string|max:255',
+            'leads.*.auth_status' => 'nullable|string|max:100',
+            'leads.*.social_media' => 'nullable|string',
+            'leads.*.source' => 'nullable|string|max:100',
+            'leads.*.budget' => 'nullable|numeric|min:0',
+            'leads.*.priority' => 'nullable|in:low,medium,high',
+            'leads.*.stage' => 'nullable|in:new,attempted,negotiation,followup,won,lost',
+            'leads.*.assignee_id' => 'nullable|exists:users,id'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'details' => $validator->errors()
+            ], 422);
+        }
+
+        DB::beginTransaction();
+        try {
+            $createdLeads = [];
+            $userId = auth()->id();
+            
+            foreach ($request->leads as $leadData) {
+                $lead = Lead::create([
+                    'name' => $leadData['name'],
+                    'email' => $leadData['email'],
+                    'phone' => $leadData['phone'] ?? null,
+                    'tech_support_phone' => $leadData['tech_support_phone'] ?? null,
+                    'store_link' => $leadData['store_link'] ?? null,
+                    'auth_status' => $leadData['auth_status'] ?? null,
+                    'social_media' => $leadData['social_media'] ?? null,
+                    'source' => $leadData['source'] ?? 'Import',
+                    'budget' => $leadData['budget'] ?? 0,
+                    'priority' => $leadData['priority'] ?? 'medium',
+                    'stage' => $leadData['stage'] ?? 'new',
+                    'assignee_id' => $leadData['assignee_id'] ?? null,
+                    'created_by' => $userId
+                ]);
+
+                // Create initial activity
+                LeadActivity::create([
+                    'lead_id' => $lead->id,
+                    'user_id' => $userId,
+                    'action' => 'create',
+                    'description' => 'Lead imported',
+                    'new_value' => 'new'
+                ]);
+
+                $lead->load(['assignee:id,name,avatar_color', 'creator:id,name']);
+                $createdLeads[] = $lead;
+            }
+
+            // Log user activity
+            UserActivity::create([
+                'user_id' => $userId,
+                'action' => 'bulk_import',
+                'description' => "Imported " . count($createdLeads) . " leads",
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+                'metadata' => ['count' => count($createdLeads)]
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'data' => $createdLeads,
+                'message' => count($createdLeads) . ' leads created successfully'
+            ], 201);
+
+        } catch (\Exception $e) {
+            DB::rollback();
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to create leads: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Bulk delete leads
+     */
+    public function bulkDelete(Request $request)
+    {
+        // Check permissions
+        if (!auth()->user()->isAdmin()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Only admins can bulk delete leads'
+            ], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'lead_ids' => 'required|array|min:1',
+            'lead_ids.*' => 'exists:leads,id'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Validation failed',
+                'details' => $validator->errors()
+            ], 422);
+        }
+
+        DB::beginTransaction();
+        try {
+            $leads = Lead::whereIn('id', $request->lead_ids)->get();
+            $leadNames = $leads->pluck('name')->toArray();
+            $count = $leads->count();
+            
+            // Delete the leads
+            Lead::whereIn('id', $request->lead_ids)->delete();
+
+            // Log user activity
+            UserActivity::create([
+                'user_id' => auth()->id(),
+                'action' => 'bulk_delete',
+                'description' => "Deleted {$count} leads",
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+                'metadata' => ['deleted_lead_ids' => $request->lead_ids, 'lead_names' => $leadNames]
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => "{$count} leads deleted successfully"
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollback();
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to bulk delete leads: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Handle file attachments
      */
     private function handleAttachments($files, Lead $lead, $activityId = null)

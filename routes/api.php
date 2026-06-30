@@ -43,6 +43,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::put('leads/{lead}/assign', [LeadController::class, 'assign']);
     Route::put('leads/{lead}/stage', [LeadController::class, 'updateStage']);
     Route::post('leads/bulk-assign', [LeadController::class, 'bulkAssign']);
+    Route::post('leads/bulk-create', [LeadController::class, 'bulkCreate']);
+    Route::delete('leads/bulk-delete', [LeadController::class, 'bulkDelete']);
     
     // Test route
     Route::get('test', function () {
