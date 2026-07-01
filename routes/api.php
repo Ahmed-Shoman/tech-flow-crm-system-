@@ -41,7 +41,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     // Leads Management
     Route::apiResource('leads', LeadController::class);
     Route::put('leads/{lead}/assign', [LeadController::class, 'assign']);
-    Route::put('leads/{lead}/stage', [LeadController::class, 'updateStage']);
+    Route::post('leads/{lead}/stage', [LeadController::class, 'updateStage']); // Changed to POST for FormData support
     Route::post('leads/bulk-assign', [LeadController::class, 'bulkAssign']);
     Route::post('leads/bulk-create', [LeadController::class, 'bulkCreate']);
     Route::delete('leads/bulk-delete', [LeadController::class, 'bulkDelete']);
